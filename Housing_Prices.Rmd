@@ -1,0 +1,66 @@
+---
+title: "Untitled"
+author: "Stephanie Hosang"
+date: "September 6, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sqldf)
+library(car)
+library(mice)
+library(estimatr)
+library(caret)
+library(ggplot2)
+library(corrplot)
+```
+
+Load train dataset
+```{r}
+ds <- read_csv(file.choose())
+
+set.seed(100)
+train_set <- sample(1460, size = 0.85*1460)
+
+train <- ds[train_set,]
+test <- ds[-train_set,]
+
+summary(train)
+str(train)
+```
+
+Model
+```{r}
+mod <- lm(SalePrice ~ LotArea + LandContour + LotConfig + LandSlope + Neighborhood + BldgType + HouseStyle + OverallQual + OverallCond + YearRemodAdd + ExterQual + Foundation + FullBath + HalfBath + BedroomAbvGr + KitchenQual + GarageCars + PoolArea, data = train)
+
+summary(mod)
+```
+
+Test data
+```{r}
+pred_mod <- predict(mod,test)
+
+data.frame( R2 = R2(pred_mod, test$SalePrice),
+            RMSE = RMSE(pred_mod, test$SalePrice),
+            MAE = MAE(pred_mod, test$SalePrice),
+            MAPE = mean(abs((pred_mod - test$SalePrice)/test$SalePrice)*100))
+
+```
+
+Create predictions
+```{r}
+test_data <- read_csv(file.choose())
+test_data$KitchenQual[is.na(test_data$KitchenQual)] <- "TA"
+test_data$GarageCars[is.na(test_data$GarageCars)] <- 0
+
+pred <- predict(mod,test_data)
+ds_pred <- data.frame(Id=test_data$Id,SalePrice=pred)
+write_csv(data.frame(ds_pred), "results.csv")
+```
+
