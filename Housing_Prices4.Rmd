@@ -1,0 +1,280 @@
+---
+title: "Untitled"
+author: "Stephanie Hosang"
+date: "September 6, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sqldf)
+library(car)
+library(mice)
+library(estimatr)
+library(caret)
+library(ggplot2)
+library(corrplot)
+library(glmnet)
+```
+
+#Load & clean train dataset
+```{r}
+ds <- read_csv("C:\\Users\\steph\\Desktop\\Kaggle\\Housing Prices\\train.csv")
+
+clean_ds <- function(ds) {
+# Recode BsmtQual
+ds$BsmtQual[is.na(ds$BsmtQual)] <- 0
+ds$BsmtQual[ds$BsmtQual=="Po"] <- 1
+ds$BsmtQual[ds$BsmtQual=="Fa"] <- 2
+ds$BsmtQual[ds$BsmtQual=="TA"] <- 3
+ds$BsmtQual[ds$BsmtQual=="Gd"] <- 4
+ds$BsmtQual[ds$BsmtQual=="Ex"] <- 5
+
+# Recode BsmtCond
+ds$BsmtCond[is.na(ds$BsmtCond)] <- 0
+ds$BsmtCond[ds$BsmtCond=="Po"] <- 1
+ds$BsmtCond[ds$BsmtCond=="Fa"] <- 2
+ds$BsmtCond[ds$BsmtCond=="TA"] <- 3
+ds$BsmtCond[ds$BsmtCond=="Gd"] <- 4
+ds$BsmtCond[ds$BsmtCond=="Ex"] <- 5
+
+# Recode KitchenQual
+ds$KitchenQual[is.na(ds$KitchenQual)] <- 0
+ds$KitchenQual[ds$KitchenQual=="Po"] <- 1
+ds$KitchenQual[ds$KitchenQual=="Fa"] <- 2
+ds$KitchenQual[ds$KitchenQual=="TA"] <- 3
+ds$KitchenQual[ds$KitchenQual=="Gd"] <- 4
+ds$KitchenQual[ds$KitchenQual=="Ex"] <- 5
+
+# Recode GarageQual
+ds$GarageQual[is.na(ds$GarageQual)] <- 0
+ds$GarageQual[ds$GarageQual=="Po"] <- 1
+ds$GarageQual[ds$GarageQual=="Fa"] <- 2
+ds$GarageQual[ds$GarageQual=="TA"] <- 3
+ds$GarageQual[ds$GarageQual=="Gd"] <- 4
+ds$GarageQual[ds$GarageQual=="Ex"] <- 5
+
+# Recode GarageCond
+ds$GarageCond[is.na(ds$GarageCond)] <- 0
+ds$GarageCond[ds$GarageCond=="Po"] <- 1
+ds$GarageCond[ds$GarageCond=="Fa"] <- 2
+ds$GarageCond[ds$GarageCond=="TA"] <- 3
+ds$GarageCond[ds$GarageCond=="Gd"] <- 4
+ds$GarageCond[ds$GarageCond=="Ex"] <- 5
+
+# Recode ExterQual
+ds$ExterQual[is.na(ds$ExterQual)] <- 0
+ds$ExterQual[ds$ExterQual=="Po"] <- 1
+ds$ExterQual[ds$ExterQual=="Fa"] <- 2
+ds$ExterQual[ds$ExterQual=="TA"] <- 3
+ds$ExterQual[ds$ExterQual=="Gd"] <- 4
+ds$ExterQual[ds$ExterQual=="Ex"] <- 5
+
+# Recode ExterCond
+ds$ExterCond[is.na(ds$ExterCond)] <- 0
+ds$ExterCond[ds$ExterCond=="Po"] <- 1
+ds$ExterCond[ds$ExterCond=="Fa"] <- 2
+ds$ExterCond[ds$ExterCond=="TA"] <- 3
+ds$ExterCond[ds$ExterCond=="Gd"] <- 4
+ds$ExterCond[ds$ExterCond=="Ex"] <- 5
+
+# #Neighbourhoods
+# ds$Class <- NA
+# ds$Class[ds$Neighborhood %in% c("MeadowV","IDOTRR","BrDale","BrkSide","Edwards","OldTown","Sawyer","Blueste","SWISU","NPkVill","NAmes","Mitchel")] <- 1
+# ds$Class[ds$Neighborhood %in% c("StoneBr","NridgHt","NoRidge")] <- 3
+# ds$Class[is.na(ds$Class)] <- 2
+
+# Clean NAs
+ds <- ds %>% mutate(GarageCars = ifelse(is.na(GarageCars),0,GarageCars),
+                    Fireplaces = ifelse(is.na(Fireplaces),0,Fireplaces),
+                    BsmtFullBath = ifelse(is.na(BsmtFullBath),0,BsmtFullBath),
+                    BsmtHalfBath = ifelse(is.na(BsmtHalfBath),0,BsmtHalfBath),
+                    MasVnrType = ifelse(is.na(MasVnrType),"None",MasVnrType),
+                    SaleType = ifelse(is.na(SaleType),"Other",SaleType),
+                    TotalBsmtSF = ifelse(is.na(TotalBsmtSF),0,TotalBsmtSF))
+
+# New variables
+ds <- ds %>% mutate(sq_ft = `1stFlrSF` + `2ndFlrSF`,
+                    TotalBath = BsmtFullBath + 0.5*BsmtHalfBath + FullBath + 0.5*HalfBath,
+                    level = ifelse(LandContour=="Lvl",1,0),
+                    frontage = ifelse(LotConfig %in% c("FR2","FR3"),1,0),
+                    Found = ifelse(Foundation %in% c("Slab","Wood","Stone"),"Other",Foundation),
+                    detached = ifelse(BldgType=="1Fam",1,0),
+                    slope = ifelse(LandSlope=="Gtl",1,0),
+                    salecond = ifelse(SaleCondition %in% c("Normal","Partial"),SaleCondition,"Other"),
+                    NewSale = ifelse(SaleType=="New",1,0),
+                    AgeBuilt = 2018 - YearBuilt,
+                    AgeRemod = 2018 - YearRemodAdd,
+                    AgeSold = 2018 - YrSold,
+                    GarageScore = as.numeric(GarageQual)*as.numeric(GarageCond),
+                    ExterScore = as.numeric(ExterQual)*as.numeric(ExterCond),
+                    OverallScore = as.numeric(OverallQual)*as.numeric(OverallCond),
+                    BsmtScore = as.numeric(BsmtQual)*as.numeric(BsmtCond),
+                    BrickExt = ifelse(Exterior1st %in% c("BrkComm","BrkFace") | Exterior2nd %in% c("BrkComm","BrkFace"),1,0),
+                    KitchenQual = as.numeric(KitchenQual),
+                    BsmtSqFt = BsmtFinSF1 + BsmtFinSF2 + BsmtUnfSF)
+
+# Change to factor
+ds <- ds %>% mutate(Neighborhood = as.factor(Neighborhood),
+                    Found = as.factor(Found),
+                    MasVnrType = as.factor(MasVnrType),
+                    HouseStyle = as.factor(HouseStyle),
+                    salecond = as.factor(salecond),
+                    Street = as.factor(Street))
+}
+
+ds <- clean_ds(ds)
+
+
+# # Remove outliers
+ds <- ds %>% filter(!(Id %in% c(1299,524))) #outliers - sq_ft
+ds <- ds %>% filter(!(Id %in% c(707,250,336,314))) #outliers - LotArea
+ds <- ds %>% filter(SalePrice <= 500000)
+ds <- ds %>% filter(SalePrice > 60000)
+#ds <- ds %>% filter(LotArea < 100000)
+ds <- ds %>% filter(!(Id %in% c(463,1325,1063,633,1182,729,589,971,875,1433))) #Weird residuals
+# ds <- ds %>% filter(!(Id %in% c(636))) #BedroomAbvGrd outlier
+# ds <- ds %>% filter(!(Id %in% c(748,421,1351,1191,1341))) # GarageCars outlier
+# ds <- ds %>% filter(!(Id %in% c(298))) #Mas Vr Area  outlier
+# ds <- ds %>% filter(!(Id %in% c(310,643,606,167,1299))) # GarageCars outlier
+# ds <- ds %>% filter(!(Id %in% c(186,584,305,748))) # YearBuilt outlier
+# ds <- ds %>% filter(!(Id %in% c(314,54))) # YearRemodAdd outlier
+
+
+
+summary(ds$LotArea)
+
+set.seed(10000)
+train_set <- sample(nrow(ds), size = 0.9*nrow(ds))
+
+train <- ds[train_set,]
+test <- ds[-train_set,]
+
+##summary(train)
+##str(ds$RoofMatl)
+
+
+```
+
+#Exploratory plots
+```{r}
+par(mfrow=c(2,2))
+plot(log(SalePrice) ~ sq_ft, data=ds)
+plot(log(SalePrice) ~ log(sq_ft), data=ds)
+plot(log(SalePrice) ~ LotArea, data=ds)
+plot(log(SalePrice) ~ log(LotArea), data=ds)
+
+```
+
+
+#Model
+```{r}
+mod <- lm(log(SalePrice) ~ log(sq_ft) * log(LotArea) + TotalBsmtSF + Neighborhood + BsmtScore + OverallScore + AgeRemod + Found + TotalBath + BedroomAbvGr + KitchenQual + GarageCars + detached + AgeSold + MasVnrType + BrickExt + ExterScore + GarageScore + NewSale + salecond + frontage + slope + level + WoodDeckSF + OpenPorchSF + EnclosedPorch + `3SsnPorch` + ScreenPorch +  PoolArea + Street + AgeBuilt, data = train)
+
+summary(mod)
+```
+
+#Joint Hypothesis Test
+```{r}
+Hypo_test <- linearHypothesis(mod, c("log(LotArea) = 0", "log(sq_ft) = 0"))
+Hypo_test
+```
+
+
+#Assessing data - Create plots
+```{r}
+par(mfrow=c(2,2))
+plot(mod)
+par(mfrow=c(1,1))
+plot(density(resid(mod)))
+
+data.frame(train$Id,resid(mod)) %>% filter(resid(mod) < -0.35 | resid(mod) > 0.35)
+```
+
+
+#Test data
+```{r}
+set.seed(10000)
+train_set <- sample(nrow(ds), size = 0.9*nrow(ds))
+
+train <- ds[train_set,]
+test <- ds[-train_set,]
+
+pred_mod <- exp(predict(mod,test))
+
+data.frame( R2 = R2(pred_mod, test$SalePrice),
+            RMSE = RMSE(pred_mod, test$SalePrice),
+            rmsle = RMSE(log(pred_mod), log(test$SalePrice)),
+            MAE = MAE(pred_mod, test$SalePrice),
+            MAPE = mean(abs((pred_mod - test$SalePrice)/test$SalePrice)*100))
+
+```
+
+# Regularization 
+```{r}
+y <- log(train$SalePrice)
+X <- model.matrix(log(SalePrice) ~ log(sq_ft) * log(LotArea) + TotalBsmtSF + Neighborhood + BsmtScore + OverallScore + AgeRemod + Found + TotalBath + BedroomAbvGr + KitchenQual + GarageCars + detached + AgeSold + MasVnrType + BrickExt + ExterScore + GarageScore + NewSale + salecond + frontage + slope + level + WoodDeckSF + OpenPorchSF + EnclosedPorch + `3SsnPorch` + ScreenPorch +  PoolArea + Street + AgeBuilt, train)[,-1]
+X_test <- model.matrix(log(SalePrice) ~ log(sq_ft) * log(LotArea) + TotalBsmtSF + Neighborhood + BsmtScore + OverallScore + AgeRemod + Found + TotalBath + BedroomAbvGr + KitchenQual + GarageCars + detached + AgeSold + MasVnrType + BrickExt + ExterScore + GarageScore + NewSale + salecond + frontage + slope + level + WoodDeckSF + OpenPorchSF + EnclosedPorch + `3SsnPorch` + ScreenPorch +  PoolArea + Street + AgeBuilt, test)[,-1]
+
+
+##LASSO
+lasso.fit<-glmnet(x = X, y = y, alpha = 1)
+plot(lasso.fit, xvar = "lambda")
+
+crossval <-  cv.glmnet(x = X, y = y, alpha = 1) #create cross-validation data
+plot(crossval)
+penalty <- crossval$lambda.min #determine optimal penalty parameter, lambda
+#penalty #see what it is
+#log(penalty) #see where it was on the graph
+lasso.opt.fit <-glmnet(x = X, y = y, alpha = 1, lambda = penalty ) #estimate the model with the optimal penalty
+#coef(lasso.opt.fit) #resultant model coefficients
+
+lasso.pred <- exp(predict(lasso.opt.fit, s = penalty, newx = X_test))
+mean(abs(lasso.pred-test$SalePrice)/test$SalePrice*100)
+
+##RIDGE
+ridge.fit<-glmnet(x = X, y = y, alpha = 0)
+plot(ridge.fit, xvar = "lambda")
+
+crossval <-  cv.glmnet(x = X, y = y, alpha = 0)
+plot(crossval)
+penalty <- crossval$lambda.min 
+#penalty
+#log(penalty) 
+ridge.opt.fit <-glmnet(x = X, y = y, alpha = 0, lambda = penalty ) #estimate the model with that
+#coef(ridge.opt.fit)
+
+ridge.pred <- exp(predict(ridge.opt.fit, s = penalty, newx = X_test))
+mean(abs(ridge.pred-test$SalePrice)/test$SalePrice*100) 
+
+
+```
+
+#Create predictions
+```{r}
+test_data <- read_csv("C:\\Users\\steph\\Desktop\\Kaggle\\Housing Prices\\test.csv")
+
+test_data <- clean_ds(test_data)
+
+test_data$SalePrice <- 0
+X_test_sub <- model.matrix(log(SalePrice) ~ log(sq_ft) * log(LotArea) + TotalBsmtSF + Neighborhood + BsmtScore + OverallScore + AgeRemod + Found + TotalBath + BedroomAbvGr + KitchenQual + GarageCars + detached + AgeSold + MasVnrType + BrickExt + ExterScore + GarageScore + NewSale + salecond + frontage + slope + level + WoodDeckSF + OpenPorchSF + EnclosedPorch + `3SsnPorch` + ScreenPorch +  PoolArea + Street + AgeBuilt, test_data)[,-1]
+
+
+pred <- exp(predict(mod,test_data))
+lasso.pred <- exp(predict(lasso.opt.fit, s = penalty, newx = X_test_sub))
+ridge.pred <- exp(predict(ridge.opt.fit, s = penalty, newx = X_test_sub))
+#ds_pred <- data.frame(Id=test_data$Id, SalePrice = (pred+lasso.pred+ridge.pred)/3)
+ds_pred <- data.frame(Id=test_data$Id, SalePrice = lasso.pred)
+colnames(ds_pred) <- c("Id","SalePrice")
+
+ds_pred[is.na(ds_pred$SalePrice),]
+nrow(pred)
+test_data$Id[is.na(test_data$SaleType)]
+
+write_csv(data.frame(ds_pred), "results.csv")
+```
